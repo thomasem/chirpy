@@ -2,25 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/thomasem/chirpy/internal/database"
 )
-
-type Chirp struct {
-	ID   int    `json:"id"`
-	Body string `json:"body"`
-}
-
-type Chirps map[int]Chirp
 
 type chirpRequest struct {
 	Body string `json:"body"`
 }
 
 type chirpService struct {
-	db *DB
+	db *database.DB
 }
 
 func cleanBody(body string) string {
@@ -55,7 +51,7 @@ func (cs *chirpService) createChirpHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	newChirp, err := cs.db.Create(cleanBody(cr.Body))
+	newChirp, err := cs.db.CreateChirp(cleanBody(cr.Body))
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create new chirp, try again later")
 	}
@@ -63,16 +59,26 @@ func (cs *chirpService) createChirpHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (cs *chirpService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps := cs.db.GetAll()
-	response := make([]Chirp, 0, len(chirps))
-	for _, chirp := range chirps {
-		response = append(response, chirp)
-	}
-	sort.Slice(response, func(i, j int) bool { return response[i].ID < response[j].ID })
-	respondWithJSON(w, http.StatusOK, response)
+	chirps := cs.db.GetChirps()
+	respondWithJSON(w, http.StatusOK, chirps)
 }
 
-func NewChirpService(db *DB) *chirpService {
+func (cs *chirpService) getChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirpIDStr := r.PathValue("chirpID")
+	chirpID, err := strconv.Atoi(chirpIDStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unexpected path value: %s", chirpIDStr))
+		return
+	}
+	chirp, ok := cs.db.GetChirp(chirpID)
+	if !ok {
+		respondWithError(w, http.StatusNotFound, "Chirp not found")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, chirp)
+}
+
+func NewChirpService(db *database.DB) *chirpService {
 	return &chirpService{
 		db: db,
 	}

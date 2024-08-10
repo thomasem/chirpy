@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/thomasem/chirpy/internal/database"
 )
 
 const (
@@ -47,6 +49,7 @@ func configureRoutes(mux *http.ServeMux, cs *chirpService, cfg *apiConfig) {
 	mux.Handle("GET /api/reset", http.HandlerFunc(cfg.resetHandler))
 	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(cs.getChirpsHandler))
+	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(cs.getChirpHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
@@ -60,7 +63,7 @@ func main() {
 		Addr:    addr,
 	}
 
-	db, err := NewDB(dbPath)
+	db, err := database.NewDB(dbPath)
 	if err != nil {
 		log.Fatalf("error getting DB connection: %s", err)
 	}
