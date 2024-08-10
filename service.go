@@ -15,7 +15,11 @@ type chirpRequest struct {
 	Body string `json:"body"`
 }
 
-type chirpService struct {
+type userRequest struct {
+	Email string `json:"email"`
+}
+
+type chirpyService struct {
 	db *database.DB
 }
 
@@ -33,12 +37,12 @@ func cleanBody(body string) string {
 	return strings.Join(words, " ")
 }
 
-func (cs *chirpService) createChirpHandler(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
+func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Request) {
 	cr := chirpRequest{}
+	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&cr)
 	if err != nil {
-		log.Printf("Error decoding chirp request: %s", err)
+		log.Printf("error decoding chirp request: %s", err)
 		respondWithError(w, http.StatusBadRequest, "invalid JSON request")
 		return
 	}
@@ -53,17 +57,19 @@ func (cs *chirpService) createChirpHandler(w http.ResponseWriter, r *http.Reques
 
 	newChirp, err := cs.db.CreateChirp(cleanBody(cr.Body))
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to create new chirp, try again later")
+		log.Printf("error creating chirp in database: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to create new chirp")
+		return
 	}
 	respondWithJSON(w, http.StatusCreated, newChirp)
 }
 
-func (cs *chirpService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
+func (cs *chirpyService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	chirps := cs.db.GetChirps()
 	respondWithJSON(w, http.StatusOK, chirps)
 }
 
-func (cs *chirpService) getChirpHandler(w http.ResponseWriter, r *http.Request) {
+func (cs *chirpyService) getChirpHandler(w http.ResponseWriter, r *http.Request) {
 	chirpIDStr := r.PathValue("chirpID")
 	chirpID, err := strconv.Atoi(chirpIDStr)
 	if err != nil {
@@ -78,8 +84,35 @@ func (cs *chirpService) getChirpHandler(w http.ResponseWriter, r *http.Request) 
 	respondWithJSON(w, http.StatusOK, chirp)
 }
 
-func NewChirpService(db *database.DB) *chirpService {
-	return &chirpService{
+func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	ur := userRequest{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&ur)
+	if err != nil {
+		log.Printf("error decoding user request: %s", err)
+		respondWithError(w, http.StatusBadRequest, "invalid JSON request")
+		return
+	}
+	if ur.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "User email missing")
+		return
+	}
+	user, err := cs.db.CreateUser(ur.Email)
+	if err != nil {
+		log.Printf("error creating new user in database: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to create new user")
+		return
+	}
+	respondWithJSON(w, http.StatusCreated, user)
+}
+
+func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request) {
+	users := cs.db.GetUsers()
+	respondWithJSON(w, http.StatusOK, users)
+}
+
+func NewChirpyService(db *database.DB) *chirpyService {
+	return &chirpyService{
 		db: db,
 	}
 }

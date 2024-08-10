@@ -40,7 +40,7 @@ func readyCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func configureRoutes(mux *http.ServeMux, cs *chirpService, cfg *apiConfig) {
+func configureRoutes(mux *http.ServeMux, cs *chirpyService, cfg *apiConfig) {
 	// Admin
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(cfg.metricsHandler))
 
@@ -50,6 +50,8 @@ func configureRoutes(mux *http.ServeMux, cs *chirpService, cfg *apiConfig) {
 	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(cs.getChirpsHandler))
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(cs.getChirpHandler))
+	mux.Handle("POST /api/users", http.HandlerFunc(cs.createUserHandler))
+	mux.Handle("GET /api/users", http.HandlerFunc(cs.getUsersHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
@@ -67,7 +69,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("error getting DB connection: %s", err)
 	}
-	cs := NewChirpService(db)
+	cs := NewChirpyService(db)
 
 	configureRoutes(mux, cs, NewAPIConfig())
 
