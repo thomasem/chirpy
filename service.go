@@ -23,6 +23,23 @@ type chirpyService struct {
 	db *database.DB
 }
 
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	er := errorResponse{Error: msg}
+	respondWithJSON(w, code, er)
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshaling JSON response: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(contentTypeHeader, jsonContentType)
+	w.WriteHeader(code)
+	w.Write(dat)
+}
+
 func cleanBody(body string) string {
 	badWords := []string{"kerfuffle", "sharbert", "fornax"}
 	words := strings.Split(body, " ")
