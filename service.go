@@ -143,16 +143,16 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Invalid login request")
 		return
 	}
-	hash, ok := cs.db.GetUserPasswordHash(ur.Email)
+	au, ok := cs.db.GetAuthUserByEmail(ur.Email)
 	if !ok {
-		respondWithError(w, http.StatusUnauthorize, "Unauthorized")
-		return
-	}
-	if !password.Matches(ur.Password, hash) {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	respondWithJSON(w, http.StatusOK, "OK")
+	if !password.Matches(ur.Password, au.Password) {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, au.User)
 }
 
 func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request) {

@@ -22,17 +22,17 @@ type User struct {
 	Email string `json:"email"`
 }
 
-type userDBRepresentation struct {
+type AuthUser struct {
 	User
 	Password []byte `json:"password"`
 }
 
 type DBRepresentation struct {
-	LastChirpID    int                          `json:"last_chirp_id"`
-	LastUserID     int                          `json:"last_user_id"`
-	Chirps         map[int]Chirp                `json:"chirps"`
-	Users          map[int]userDBRepresentation `json:"users"`
-	UserEmailIndex map[string]int               `json:"user_email_idx"`
+	LastChirpID    int              `json:"last_chirp_id"`
+	LastUserID     int              `json:"last_user_id"`
+	Chirps         map[int]Chirp    `json:"chirps"`
+	Users          map[int]AuthUser `json:"users"`
+	UserEmailIndex map[string]int   `json:"user_email_idx"`
 }
 
 type DB struct {
@@ -75,7 +75,7 @@ func (db *DB) CreateUser(email string, pwHash []byte) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	newUser := userDBRepresentation{
+	newUser := AuthUser{
 		User: User{
 			ID:    db.data.LastUserID + 1,
 			Email: email,
@@ -108,15 +108,15 @@ func (db *DB) UserExists(email string) bool {
 	return ok
 }
 
-func (db *DB) GetUserPasswordHash(email string) ([]byte, bool) {
+func (db *DB) GetAuthUserByEmail(email string) (AuthUser, bool) {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	userID, ok := db.data.UserEmailIndex[email]
 	if !ok {
-		return []byte{}, ok
+		return AuthUser{}, ok
 	}
 	user, ok := db.data.Users[userID]
-	return user.Password, ok
+	return user, ok
 }
 
 func (db *DB) CreateChirp(body string) (Chirp, error) {
@@ -169,7 +169,7 @@ func NewDB(path string, truncate bool) (*DB, error) {
 			LastChirpID:    0,
 			LastUserID:     0,
 			Chirps:         make(map[int]Chirp),
-			Users:          make(map[int]userDBRepresentation),
+			Users:          make(map[int]AuthUser),
 			UserEmailIndex: make(map[string]int),
 		},
 		mux: &sync.RWMutex{},
