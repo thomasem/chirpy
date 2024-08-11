@@ -145,7 +145,7 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, ok := cs.db.GetUserPasswordHash(ur.Email)
 	if !ok {
-		respondWithError(w, http.StatusInternalServerError, "Unable to find User")
+		respondWithError(w, http.StatusUnauthorize, "Unauthorized")
 		return
 	}
 	if !password.Matches(ur.Password, hash) {
