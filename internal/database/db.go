@@ -22,11 +22,17 @@ type User struct {
 	Email string `json:"email"`
 }
 
+type userDBRepresentation struct {
+	User
+	Password []byte `json:"password"`
+}
+
 type DBRepresentation struct {
-	LastChirpID int           `json:"last_chirp_id"`
-	LastUserID  int           `json:"last_user_id"`
-	Chirps      map[int]Chirp `json:"chirps"`
-	Users       map[int]User  `json:"users"`
+	LastChirpID    int                          `json:"last_chirp_id"`
+	LastUserID     int                          `json:"last_user_id"`
+	Chirps         map[int]Chirp                `json:"chirps"`
+	Users          map[int]userDBRepresentation `json:"users"`
+	UserEmailIndex map[string]int               `json:"user_email_idx"`
 }
 
 type DB struct {
@@ -62,35 +68,55 @@ func (db *DB) writeDB() error {
 	return os.WriteFile(db.path, data, fileMode)
 }
 
-func (db *DB) CreateUser(email string) (User, error) {
+func (db *DB) CreateUser(email string, pwHash []byte) (User, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 	err := db.loadDB()
 	if err != nil {
 		return User{}, err
 	}
-	newUser := User{
-		ID:    db.data.LastUserID + 1,
-		Email: email,
+	newUser := userDBRepresentation{
+		User: User{
+			ID:    db.data.LastUserID + 1,
+			Email: email,
+		},
+		Password: pwHash,
 	}
 	db.data.Users[newUser.ID] = newUser
+	db.data.UserEmailIndex[newUser.Email] = newUser.ID
 	db.data.LastUserID = newUser.ID
 	err = db.writeDB()
 	if err != nil {
 		return User{}, err
 	}
-	return newUser, nil
+	return newUser.User, nil
 }
 
 func (db *DB) GetUsers() []User {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	users := make([]User, 0, len(db.data.Users))
-	for _, user := range db.data.Users {
-		users = append(users, user)
+	for _, u := range db.data.Users {
+		users = append(users, u.User)
 	}
 	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
 	return users
+}
+
+func (db *DB) UserExists(email string) bool {
+	_, ok := db.data.UserEmailIndex[email]
+	return ok
+}
+
+func (db *DB) GetUserPasswordHash(email string) ([]byte, bool) {
+	db.mux.RLock()
+	defer db.mux.RUnlock()
+	userID, ok := db.data.UserEmailIndex[email]
+	if !ok {
+		return []byte{}, ok
+	}
+	user, ok := db.data.Users[userID]
+	return user.Password, ok
 }
 
 func (db *DB) CreateChirp(body string) (Chirp, error) {
@@ -131,14 +157,20 @@ func (db *DB) GetChirps() []Chirp {
 	return chirps
 }
 
-func NewDB(path string) (*DB, error) {
+func NewDB(path string, truncate bool) (*DB, error) {
+	if truncate {
+		// Might be worth having some extra guarding to ensure we don't accidentally
+		// delete something we want, but for now this works OK
+		os.Remove(path)
+	}
 	newDB := &DB{
 		path: path,
 		data: DBRepresentation{
-			LastChirpID: 0,
-			LastUserID:  0,
-			Chirps:      make(map[int]Chirp),
-			Users:       make(map[int]User),
+			LastChirpID:    0,
+			LastUserID:     0,
+			Chirps:         make(map[int]Chirp),
+			Users:          make(map[int]userDBRepresentation),
+			UserEmailIndex: make(map[string]int),
 		},
 		mux: &sync.RWMutex{},
 	}

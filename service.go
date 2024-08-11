@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/thomasem/chirpy/internal/database"
+	"github.com/thomasem/chirpy/internal/password"
 )
 
 type chirpRequest struct {
@@ -16,7 +17,8 @@ type chirpRequest struct {
 }
 
 type userRequest struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type chirpyService struct {
@@ -110,17 +112,47 @@ func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Reques
 		respondWithError(w, http.StatusBadRequest, "invalid JSON request")
 		return
 	}
-	if ur.Email == "" {
-		respondWithError(w, http.StatusBadRequest, "User email missing")
+	if ur.Email == "" || ur.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "User missing required fields")
 		return
 	}
-	user, err := cs.db.CreateUser(ur.Email)
+	exists := cs.db.UserExists(ur.Email)
+	if exists {
+		respondWithError(w, http.StatusConflict, "User already exists")
+		return
+	}
+	pwHash, err := password.StringToHash(ur.Password)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "User password invalid")
+		return
+	}
+	user, err := cs.db.CreateUser(ur.Email, pwHash)
 	if err != nil {
 		log.Printf("error creating new user in database: %s", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to create new user")
 		return
 	}
 	respondWithJSON(w, http.StatusCreated, user)
+}
+
+func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
+	ur := userRequest{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&ur)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid login request")
+		return
+	}
+	hash, ok := cs.db.GetUserPasswordHash(ur.Email)
+	if !ok {
+		respondWithError(w, http.StatusInternalServerError, "Unable to find User")
+		return
+	}
+	if !password.Matches(ur.Password, hash) {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, "OK")
 }
 
 func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request) {

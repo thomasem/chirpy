@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 
@@ -34,6 +35,7 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService, cfg *apiConfig) {
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(cs.getChirpHandler))
 	mux.Handle("POST /api/users", http.HandlerFunc(cs.createUserHandler))
 	mux.Handle("GET /api/users", http.HandlerFunc(cs.getUsersHandler))
+	mux.Handle("POST /api/login", http.HandlerFunc(cs.loginHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
@@ -47,7 +49,10 @@ func main() {
 		Addr:    addr,
 	}
 
-	db, err := database.NewDB(dbPath)
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+
+	db, err := database.NewDB(dbPath, *dbg)
 	if err != nil {
 		log.Fatalf("error getting DB connection: %s", err)
 	}
