@@ -59,16 +59,16 @@ func cleanBody(body string) string {
 	return strings.Join(words, " ")
 }
 
-func (cfg *chirpyService) middlewareMetricsInc(next http.Handler) http.Handler {
+func (cs *chirpyService) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.metricsMux.Lock()
-		cfg.fileserverHits++
-		cfg.metricsMux.Unlock()
+		cs.metricsMux.Lock()
+		cs.fileserverHits++
+		cs.metricsMux.Unlock()
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (cfg *chirpyService) metricsHandler(w http.ResponseWriter, r *http.Request) {
+func (cs *chirpyService) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	template := `
 		<html>
 
@@ -81,13 +81,15 @@ func (cfg *chirpyService) metricsHandler(w http.ResponseWriter, r *http.Request)
 	`
 	w.Header().Set(contentTypeHeader, htmlContentType)
 	w.WriteHeader(http.StatusOK)
-	cfg.metricsMux.RLock()
-	defer cfg.metricsMux.RUnlock()
-	fmt.Fprintf(w, template, cfg.fileserverHits)
+	cs.metricsMux.RLock()
+	defer cs.metricsMux.RUnlock()
+	fmt.Fprintf(w, template, cs.fileserverHits)
 }
 
-func (cfg *chirpyService) resetHandler(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits = 0
+func (cs *chirpyService) resetHandler(w http.ResponseWriter, r *http.Request) {
+	cs.metricsMux.Lock()
+	cs.fileserverHits = 0
+	cs.metricsMux.Unlock()
 	w.Header().Set(contentTypeHeader, textPlainContentType)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Metrics reset!"))
