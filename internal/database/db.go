@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"sync"
@@ -10,6 +11,10 @@ import (
 
 const (
 	fileMode = 0666
+)
+
+var (
+	ErrDoesNotExist = errors.New("does not exist")
 )
 
 type Chirp struct {
@@ -104,6 +109,8 @@ func (db *DB) GetUsers() []User {
 }
 
 func (db *DB) UserExists(email string) bool {
+	db.mux.RLock()
+	defer db.mux.RUnlock()
 	_, ok := db.data.UserEmailIndex[email]
 	return ok
 }
@@ -117,6 +124,29 @@ func (db *DB) GetAuthUserByEmail(email string) (AuthUser, bool) {
 	}
 	user, ok := db.data.Users[userID]
 	return user, ok
+}
+
+func (db *DB) UpdateUser(userID int, email string, pwHash []byte) (User, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+	user, ok := db.data.Users[userID]
+	if !ok {
+		return User{}, ErrDoesNotExist
+	}
+	delete(db.data.UserEmailIndex, user.Email)
+	user.Email = email
+	user.Password = pwHash
+	db.data.Users[userID] = user
+	db.data.UserEmailIndex[user.Email] = user.ID
+	err = db.writeDB()
+	if err != nil {
+		return User{}, err
+	}
+	return user.User, nil
 }
 
 func (db *DB) CreateChirp(body string) (Chirp, error) {

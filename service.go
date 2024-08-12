@@ -18,6 +18,7 @@ import (
 
 const (
 	contentTypeHeader    = "Content-Type"
+	authorizationHeader  = "Authorization"
 	textPlainContentType = "text/plain; charset=utf-8"
 	htmlContentType      = "text/html"
 	jsonContentType      = "application/json"
@@ -56,7 +57,7 @@ type chirpyService struct {
 	fileserverHits int
 	metricsMux     *sync.RWMutex
 	db             *database.DB
-	jwtSecret      string
+	jwtSecret      []byte
 }
 
 func cleanBody(body string) string {
@@ -90,7 +91,7 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(data)
 }
 
-func (cs *chirpyService) generateJWTString(userID int, expiresInSeconds int) (string, error) {
+func (cs *chirpyService) generateJWT(userID int, expiresInSeconds int) (string, error) {
 	secondsInDay := 60 * 60 * 24 * time.Second
 	expireDuration := time.Duration(expiresInSeconds) * time.Second
 	if expireDuration == 0 || expireDuration > secondsInDay {
@@ -104,8 +105,22 @@ func (cs *chirpyService) generateJWTString(userID int, expiresInSeconds int) (st
 		IssuedAt:  jwt.NewNumericDate(issuedAt),
 		ExpiresAt: jwt.NewNumericDate(expiresAt),
 	})
-	s, err := token.SignedString([]byte(cs.jwtSecret))
+	s, err := token.SignedString(cs.jwtSecret)
 	return s, err
+}
+
+func (cs *chirpyService) getUserIDFromJWT(jwtString string) (int, error) {
+	parser := jwt.NewParser()
+	kf := func(t *jwt.Token) (interface{}, error) {
+		return cs.jwtSecret, nil
+	}
+	token, err := parser.ParseWithClaims(jwtString, &jwt.RegisteredClaims{}, kf)
+	if err != nil {
+		return 0, err
+	}
+	claims := token.Claims.(*jwt.RegisteredClaims)
+	id, err := strconv.Atoi(claims.Subject)
+	return id, err
 }
 
 func (cs *chirpyService) readyHandler(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +171,7 @@ func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Reque
 	err := decoder.Decode(&cr)
 	if err != nil {
 		log.Printf("error decoding chirp request: %s", err)
-		respondWithError(w, http.StatusBadRequest, "invalid JSON request")
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
 	}
 	if cr.Body == "" {
@@ -215,8 +230,7 @@ func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Reques
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&ur)
 	if err != nil {
-		log.Printf("error decoding user request: %s", err)
-		respondWithError(w, http.StatusBadRequest, "invalid JSON request")
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
 	}
 	if ur.Email == "" || ur.Password == "" {
@@ -262,7 +276,7 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	token, err := cs.generateJWTString(au.ID, lr.ExpiresInSeconds)
+	token, err := cs.generateJWT(au.ID, lr.ExpiresInSeconds)
 	if err != nil {
 		log.Printf("error generating JWT: %s", err)
 		respondWithError(w, http.StatusInternalServerError, "Unable to generate token for user")
@@ -289,11 +303,47 @@ func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request)
 	respondWithJSON(w, http.StatusOK, response)
 }
 
+func (cs *chirpyService) updateUserHandler(w http.ResponseWriter, r *http.Request) {
+	ur := userRequest{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&ur)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
+		return
+	}
+	token := r.Header.Get(authorizationHeader)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
+		return
+	}
+	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer"))
+	userID, err := cs.getUserIDFromJWT(token)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	pwHash, err := password.StringToHash(ur.Password)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "User password invalid")
+		return
+	}
+	updated, err := cs.db.UpdateUser(userID, ur.Email, pwHash)
+	if err != nil {
+		log.Printf("error updating user in database: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to update user")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, User{
+		ID:    updated.ID,
+		Email: updated.Email,
+	})
+}
+
 func NewChirpyService(db *database.DB, jwtSecret string) *chirpyService {
 	return &chirpyService{
 		db:             db,
 		metricsMux:     &sync.RWMutex{},
 		fileserverHits: 0,
-		jwtSecret:      jwtSecret,
+		jwtSecret:      []byte(jwtSecret),
 	}
 }

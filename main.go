@@ -25,7 +25,7 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	// Admin
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(cs.metricsHandler))
 
-	// API
+	// Unauthenticated API
 	mux.Handle("GET /api/healthz", http.HandlerFunc(cs.readyHandler))
 	mux.Handle("GET /api/reset", http.HandlerFunc(cs.resetHandler))
 	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
@@ -34,6 +34,9 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	mux.Handle("POST /api/users", http.HandlerFunc(cs.createUserHandler))
 	mux.Handle("GET /api/users", http.HandlerFunc(cs.getUsersHandler))
 	mux.Handle("POST /api/login", http.HandlerFunc(cs.loginHandler))
+
+	// Authenticated API
+	mux.Handle("PUT /api/users", http.HandlerFunc(cs.updateUserHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
