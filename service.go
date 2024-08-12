@@ -13,8 +13,16 @@ import (
 	"github.com/thomasem/chirpy/internal/password"
 )
 
-type chirpRequest struct {
-	Body string `json:"body"`
+const (
+	contentTypeHeader    = "Content-Type"
+	textPlainContentType = "text/plain; charset=utf-8"
+	htmlContentType      = "text/html"
+	jsonContentType      = "application/json"
+)
+
+type User struct {
+	ID    int    `json:"id"`
+	Email string `json:"email"`
 }
 
 type userRequest struct {
@@ -22,27 +30,30 @@ type userRequest struct {
 	Password string `json:"password"`
 }
 
+type loginRequest struct {
+	userRequest
+	ExpiresInSeconds int `json:"expires_in_seconds"`
+}
+
+type loginResponse struct {
+	User
+	Token string `json:"token"`
+}
+
+type Chirp struct {
+	ID   int    `json:"id"`
+	Body string `json:"body"`
+}
+
+type chirpRequest struct {
+	Body string `json:"body"`
+}
+
 type chirpyService struct {
 	fileserverHits int
 	metricsMux     *sync.RWMutex
 	db             *database.DB
-}
-
-func respondWithError(w http.ResponseWriter, code int, msg string) {
-	er := errorResponse{Error: msg}
-	respondWithJSON(w, code, er)
-}
-
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	dat, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("Error marshaling JSON response: %s", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set(contentTypeHeader, jsonContentType)
-	w.WriteHeader(code)
-	w.Write(dat)
+	jwtSecret      string
 }
 
 func cleanBody(body string) string {
@@ -57,6 +68,29 @@ func cleanBody(body string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	er := errorResponse{Error: msg}
+	respondWithJSON(w, code, er)
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshaling JSON response: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(contentTypeHeader, jsonContentType)
+	w.WriteHeader(code)
+	w.Write(data)
+}
+
+func (cs *chirpyService) readyHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(contentTypeHeader, textPlainContentType)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }
 
 func (cs *chirpyService) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -119,12 +153,22 @@ func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Reque
 		respondWithError(w, http.StatusInternalServerError, "Failed to create new chirp")
 		return
 	}
-	respondWithJSON(w, http.StatusCreated, newChirp)
+	respondWithJSON(w, http.StatusCreated, Chirp{
+		ID:   newChirp.ID,
+		Body: newChirp.Body,
+	})
 }
 
 func (cs *chirpyService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	chirps := cs.db.GetChirps()
-	respondWithJSON(w, http.StatusOK, chirps)
+	response := make([]Chirp, 0, len(chirps))
+	for _, chirp := range chirps {
+		response = append(response, Chirp{
+			ID:   chirp.ID,
+			Body: chirp.Body,
+		})
+	}
+	respondWithJSON(w, http.StatusOK, response)
 }
 
 func (cs *chirpyService) getChirpHandler(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +183,10 @@ func (cs *chirpyService) getChirpHandler(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusNotFound, "Chirp not found")
 		return
 	}
-	respondWithJSON(w, http.StatusOK, chirp)
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:   chirp.ID,
+		Body: chirp.Body,
+	})
 }
 
 func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -171,42 +218,54 @@ func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Reques
 		respondWithError(w, http.StatusInternalServerError, "Failed to create new user")
 		return
 	}
-	respondWithJSON(w, http.StatusCreated, user)
+	respondWithJSON(w, http.StatusCreated, User{
+		ID:    user.ID,
+		Email: user.Email,
+	})
 }
 
 func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
-	ur := userRequest{}
+	lr := loginRequest{}
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&ur)
+	err := decoder.Decode(&lr)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid login request")
 		return
 	}
-	au, ok := cs.db.GetAuthUserByEmail(ur.Email)
+	au, ok := cs.db.GetAuthUserByEmail(lr.Email)
 	if !ok {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	if !password.Matches(ur.Password, au.Password) {
+	if !password.Matches(lr.Password, au.Password) {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	respondWithJSON(w, http.StatusOK, au.User)
+	respondWithJSON(w, http.StatusOK, loginResponse{
+		User: User{
+			ID:    au.ID,
+			Email: au.Email,
+		},
+	})
 }
 
 func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request) {
 	users := cs.db.GetUsers()
-	respondWithJSON(w, http.StatusOK, users)
+	response := make([]User, 0, len(users))
+	for _, user := range users {
+		response = append(response, User{
+			ID:    user.ID,
+			Email: user.Email,
+		})
+	}
+	respondWithJSON(w, http.StatusOK, response)
 }
 
-func (cs *chirpyService) updateUser(w http.ResponseWriter, r *http.Request) {
-	respondWithJSON(w, http.StatusOK, "OK")
-}
-
-func NewChirpyService(db *database.DB) *chirpyService {
+func NewChirpyService(db *database.DB, jwtSecret string) *chirpyService {
 	return &chirpyService{
 		db:             db,
 		metricsMux:     &sync.RWMutex{},
 		fileserverHits: 0,
+		jwtSecret:      jwtSecret,
 	}
 }
