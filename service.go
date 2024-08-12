@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/thomasem/chirpy/internal/database"
 	"github.com/thomasem/chirpy/internal/password"
@@ -22,7 +23,9 @@ type userRequest struct {
 }
 
 type chirpyService struct {
-	db *database.DB
+	fileserverHits int
+	metricsMux     *sync.RWMutex
+	db             *database.DB
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
@@ -54,6 +57,40 @@ func cleanBody(body string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+func (cfg *chirpyService) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.metricsMux.Lock()
+		cfg.fileserverHits++
+		cfg.metricsMux.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (cfg *chirpyService) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	template := `
+		<html>
+
+		<body>
+			<h1>Welcome, Chirpy Admin</h1>
+			<p>Chirpy has been visited %d times!</p>
+		</body>
+
+		</html>
+	`
+	w.Header().Set(contentTypeHeader, htmlContentType)
+	w.WriteHeader(http.StatusOK)
+	cfg.metricsMux.RLock()
+	defer cfg.metricsMux.RUnlock()
+	fmt.Fprintf(w, template, cfg.fileserverHits)
+}
+
+func (cfg *chirpyService) resetHandler(w http.ResponseWriter, r *http.Request) {
+	cfg.fileserverHits = 0
+	w.Header().Set(contentTypeHeader, textPlainContentType)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Metrics reset!"))
 }
 
 func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Request) {
@@ -160,8 +197,14 @@ func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request)
 	respondWithJSON(w, http.StatusOK, users)
 }
 
+func (cs *chirpyService) updateUser(w http.ResponseWriter, r *http.Request) {
+	respondWithJSON(w, http.StatusOK, "OK")
+}
+
 func NewChirpyService(db *database.DB) *chirpyService {
 	return &chirpyService{
-		db: db,
+		db:             db,
+		metricsMux:     &sync.RWMutex{},
+		fileserverHits: 0,
 	}
 }

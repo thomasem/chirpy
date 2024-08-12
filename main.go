@@ -23,13 +23,13 @@ func readyCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func configureRoutes(mux *http.ServeMux, cs *chirpyService, cfg *apiConfig) {
+func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	// Admin
-	mux.Handle("GET /admin/metrics", http.HandlerFunc(cfg.metricsHandler))
+	mux.Handle("GET /admin/metrics", http.HandlerFunc(cs.metricsHandler))
 
 	// API
 	mux.Handle("GET /api/healthz", http.HandlerFunc(readyCheck))
-	mux.Handle("GET /api/reset", http.HandlerFunc(cfg.resetHandler))
+	mux.Handle("GET /api/reset", http.HandlerFunc(cs.resetHandler))
 	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(cs.getChirpsHandler))
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(cs.getChirpHandler))
@@ -37,9 +37,12 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService, cfg *apiConfig) {
 	mux.Handle("GET /api/users", http.HandlerFunc(cs.getUsersHandler))
 	mux.Handle("POST /api/login", http.HandlerFunc(cs.loginHandler))
 
+	// Authenticated API
+	mux.Handle("PUT /api/users", http.HandlerFunc(cs.updateUser))
+
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
-	mux.Handle("/app/*", http.StripPrefix("/app", cfg.middlewareMetricsInc(appHandler)))
+	mux.Handle("/app/*", http.StripPrefix("/app", cs.middlewareMetricsInc(appHandler)))
 }
 
 func main() {
@@ -58,7 +61,7 @@ func main() {
 	}
 	cs := NewChirpyService(db)
 
-	configureRoutes(mux, cs, NewAPIConfig())
+	configureRoutes(mux, cs)
 
 	done := make(chan struct{})
 	go func() {
