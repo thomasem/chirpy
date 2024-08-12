@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/thomasem/chirpy/internal/database"
 	"github.com/thomasem/chirpy/internal/password"
@@ -85,6 +88,24 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set(contentTypeHeader, jsonContentType)
 	w.WriteHeader(code)
 	w.Write(data)
+}
+
+func (cs *chirpyService) generateJWTString(userID int, expiresInSeconds int) (string, error) {
+	secondsInDay := 60 * 60 * 24 * time.Second
+	expireDuration := time.Duration(expiresInSeconds) * time.Second
+	if expireDuration == 0 || expireDuration > secondsInDay {
+		expireDuration = secondsInDay
+	}
+	issuedAt := time.Now().UTC()
+	expiresAt := issuedAt.Add(expireDuration)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		Subject:   fmt.Sprintf("%v", userID),
+		IssuedAt:  jwt.NewNumericDate(issuedAt),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+	})
+	s, err := token.SignedString([]byte(cs.jwtSecret))
+	return s, err
 }
 
 func (cs *chirpyService) readyHandler(w http.ResponseWriter, r *http.Request) {
@@ -241,11 +262,18 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	token, err := cs.generateJWTString(au.ID, lr.ExpiresInSeconds)
+	if err != nil {
+		log.Printf("error generating JWT: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "Unable to generate token for user")
+		return
+	}
 	respondWithJSON(w, http.StatusOK, loginResponse{
 		User: User{
 			ID:    au.ID,
 			Email: au.Email,
 		},
+		Token: token,
 	})
 }
 
