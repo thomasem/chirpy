@@ -21,6 +21,10 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "assets/logo.png")
+}
+
 func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	// Admin
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(cs.metricsHandler))
@@ -40,6 +44,7 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
+	mux.Handle("/favicon.ico", http.HandlerFunc(faviconHandler))
 	mux.Handle("/app/*", http.StripPrefix("/app", cs.middlewareMetricsInc(appHandler)))
 }
 
