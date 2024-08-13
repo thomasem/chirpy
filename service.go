@@ -14,6 +14,9 @@ import (
 	"github.com/thomasem/chirpy/internal/database"
 )
 
+// TODOs:
+// * DRY up authentication, especially Bearer tokens
+
 const (
 	contentTypeHeader   = "Content-Type"
 	authorizationHeader = "Authorization"
@@ -177,7 +180,6 @@ func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Reque
 	decoder := json.NewDecoder(r.Body)
 	err = decoder.Decode(&cr)
 	if err != nil {
-		log.Printf("error decoding chirp request: %s", err)
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
 	}
