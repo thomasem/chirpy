@@ -214,9 +214,13 @@ func (cs *chirpyService) getChirpHandler(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unexpected path value: %s", chirpIDStr))
 		return
 	}
-	chirp, ok := cs.db.GetChirp(chirpID)
-	if !ok {
+	chirp, err := cs.db.GetChirp(chirpID)
+	if err == database.ErrDoesNotExist {
 		respondWithError(w, http.StatusNotFound, "Chirp not found")
+		return
+	}
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error retrieving chirp")
 		return
 	}
 	respondWithJSON(w, http.StatusOK, Chirp{
@@ -267,13 +271,13 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Invalid login request")
 		return
 	}
-	au, ok := cs.db.GetAuthUserByEmail(lr.Email)
-	if !ok {
-		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+	au, err := cs.db.GetAuthUserByEmail(lr.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't get user")
 		return
 	}
 	if !password.Matches(lr.Password, au.Password) {
-		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		respondWithError(w, http.StatusUnauthorized, "Incorrect password")
 		return
 	}
 	token, err := cs.generateJWT(au.ID, lr.ExpiresInSeconds)

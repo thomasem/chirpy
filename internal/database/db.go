@@ -14,7 +14,8 @@ const (
 )
 
 var (
-	ErrDoesNotExist = errors.New("does not exist")
+	ErrDoesNotExist  = errors.New("does not exist")
+	ErrAlreadyExists = errors.New("already exists")
 )
 
 type Chirp struct {
@@ -80,6 +81,10 @@ func (db *DB) CreateUser(email string, pwHash []byte) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	_, ok := db.data.UserEmailIndex[email]
+	if ok {
+		return User{}, ErrAlreadyExists
+	}
 	newUser := AuthUser{
 		User: User{
 			ID:    db.data.LastUserID + 1,
@@ -115,15 +120,18 @@ func (db *DB) UserExists(email string) bool {
 	return ok
 }
 
-func (db *DB) GetAuthUserByEmail(email string) (AuthUser, bool) {
+func (db *DB) GetAuthUserByEmail(email string) (AuthUser, error) {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	userID, ok := db.data.UserEmailIndex[email]
 	if !ok {
-		return AuthUser{}, ok
+		return AuthUser{}, ErrDoesNotExist
 	}
 	user, ok := db.data.Users[userID]
-	return user, ok
+	if !ok {
+		return AuthUser{}, ErrDoesNotExist
+	}
+	return user, nil
 }
 
 func (db *DB) UpdateUser(userID int, email string, pwHash []byte) (User, error) {
@@ -169,11 +177,14 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	return newChirp, nil
 }
 
-func (db *DB) GetChirp(chirpID int) (Chirp, bool) {
+func (db *DB) GetChirp(chirpID int) (Chirp, error) {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	c, ok := db.data.Chirps[chirpID]
-	return c, ok
+	if !ok {
+		return Chirp{}, ErrDoesNotExist
+	}
+	return c, nil
 }
 
 func (db *DB) GetChirps() []Chirp {
