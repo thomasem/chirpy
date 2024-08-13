@@ -32,15 +32,21 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	// Unauthenticated API
 	mux.Handle("GET /api/healthz", http.HandlerFunc(cs.readyHandler))
 	mux.Handle("GET /api/reset", http.HandlerFunc(cs.resetHandler))
-	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(cs.getChirpsHandler))
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(cs.getChirpHandler))
 	mux.Handle("POST /api/users", http.HandlerFunc(cs.createUserHandler))
 	mux.Handle("GET /api/users", http.HandlerFunc(cs.getUsersHandler))
+
+	// Password Authenticated API
 	mux.Handle("POST /api/login", http.HandlerFunc(cs.loginHandler))
 
-	// Authenticated API
+	// Refresh Token Authenticated API
+	mux.Handle("POST /api/refresh", http.HandlerFunc(cs.refreshTokenHandler))
+	mux.Handle("POST /api/revoke", http.HandlerFunc(cs.refreshTokenRevokeHandler))
+
+	// JWT Authenticated API
 	mux.Handle("PUT /api/users", http.HandlerFunc(cs.updateUserHandler))
+	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))

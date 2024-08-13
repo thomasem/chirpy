@@ -7,7 +7,12 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 )
+
+// TODOs:
+// * DRY up load / write pattern when mutating DB
+// * Client-specific refresh tokens
 
 const (
 	fileMode = 0666
@@ -19,8 +24,9 @@ var (
 )
 
 type Chirp struct {
-	ID   int    `json:"id"`
-	Body string `json:"body"`
+	ID       int    `json:"id"`
+	AuthorID int    `json:"author_id"`
+	Body     string `json:"body"`
 }
 
 type User struct {
@@ -33,12 +39,19 @@ type AuthUser struct {
 	Password []byte `json:"password"`
 }
 
+type RefreshToken struct {
+	Token      string
+	UserID     int
+	Expiration time.Time
+}
+
 type DBRepresentation struct {
-	LastChirpID    int              `json:"last_chirp_id"`
-	LastUserID     int              `json:"last_user_id"`
-	Chirps         map[int]Chirp    `json:"chirps"`
-	Users          map[int]AuthUser `json:"users"`
-	UserEmailIndex map[string]int   `json:"user_email_idx"`
+	LastChirpID    int                     `json:"last_chirp_id"`
+	LastUserID     int                     `json:"last_user_id"`
+	Chirps         map[int]Chirp           `json:"chirps"`
+	Users          map[int]AuthUser        `json:"users"`
+	UserEmailIndex map[string]int          `json:"user_email_idx"`
+	RefreshTokens  map[string]RefreshToken `json:"refresh_tokens"`
 }
 
 type DB struct {
@@ -157,7 +170,56 @@ func (db *DB) UpdateUser(userID int, email string, pwHash []byte) (User, error) 
 	return user.User, nil
 }
 
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateRefreshToken(token string, userID int, expiresInSeconds int) (RefreshToken, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	err := db.loadDB()
+	if err != nil {
+		return RefreshToken{}, err
+	}
+	_, ok := db.data.RefreshTokens[token]
+	if ok {
+		return RefreshToken{}, ErrAlreadyExists
+	}
+	rt := RefreshToken{
+		Token:      token,
+		UserID:     userID,
+		Expiration: time.Now().UTC().Add(time.Duration(expiresInSeconds) * time.Second),
+	}
+	db.data.RefreshTokens[rt.Token] = rt
+	err = db.writeDB()
+	if err != nil {
+		return RefreshToken{}, err
+	}
+	return rt, nil
+}
+
+func (db *DB) GetRefreshToken(token string) (RefreshToken, error) {
+	db.mux.RLock()
+	defer db.mux.RUnlock()
+	rt, ok := db.data.RefreshTokens[token]
+	if !ok {
+		return RefreshToken{}, ErrDoesNotExist
+	}
+	return rt, nil
+}
+
+func (db *DB) DeleteRefreshToken(token string) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	delete(db.data.RefreshTokens, token)
+	err = db.writeDB()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) CreateChirp(body string, authorID int) (Chirp, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 	err := db.loadDB()
@@ -165,8 +227,9 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 		return Chirp{}, err
 	}
 	newChirp := Chirp{
-		ID:   db.data.LastChirpID + 1,
-		Body: body,
+		ID:       db.data.LastChirpID + 1,
+		AuthorID: authorID,
+		Body:     body,
 	}
 	db.data.Chirps[newChirp.ID] = newChirp
 	db.data.LastChirpID = newChirp.ID
@@ -212,6 +275,7 @@ func NewDB(path string, truncate bool) (*DB, error) {
 			Chirps:         make(map[int]Chirp),
 			Users:          make(map[int]AuthUser),
 			UserEmailIndex: make(map[string]int),
+			RefreshTokens:  make(map[string]RefreshToken),
 		},
 		mux: &sync.RWMutex{},
 	}
