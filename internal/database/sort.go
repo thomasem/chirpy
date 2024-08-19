@@ -6,14 +6,14 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-type SortDirection int
+type SortOrder int
 
 const (
-	Asc SortDirection = iota
+	Asc SortOrder = iota
 	Desc
 )
 
-func sortSlice[T any, V constraints.Ordered](items []T, direction SortDirection, prop func(T) V) {
+func sortSlice[T any, V constraints.Ordered](items []T, direction SortOrder, prop func(T) V) {
 	if direction == Desc {
 		sort.Slice(items, func(i, j int) bool { return prop(items[i]) > prop(items[j]) })
 	} else {

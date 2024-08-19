@@ -114,7 +114,7 @@ func getAuthorID(r *http.Request) (int, error) {
 	return strconv.Atoi(authorIDString)
 }
 
-func getSortDir(r *http.Request) database.SortDirection {
+func getSortOrder(r *http.Request) database.SortOrder {
 	sortDirString := r.URL.Query().Get("sort")
 	if sortDirString == "desc" {
 		return database.Desc
@@ -286,7 +286,7 @@ func (cs *chirpyService) getChirpsHandler(w http.ResponseWriter, r *http.Request
 		respondWithError(w, http.StatusBadRequest, "Invalid author ID in URL")
 		return
 	}
-	sort := getSortDir(r)
+	sort := getSortOrder(r)
 	chirps := cs.db.GetChirps(authorID, sort)
 	response := make([]Chirp, 0, len(chirps))
 	for _, chirp := range chirps {

@@ -266,7 +266,7 @@ func (db *DB) GetChirp(chirpID int) (Chirp, error) {
 	return c, nil
 }
 
-func (db *DB) GetChirps(authorID int, sortDirection SortDirection) []Chirp {
+func (db *DB) GetChirps(authorID int, sortDirection SortOrder) []Chirp {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	chirps := make([]Chirp, 0, len(db.data.Chirps))
