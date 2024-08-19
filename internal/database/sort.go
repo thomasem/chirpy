@@ -14,11 +14,9 @@ const (
 )
 
 func sortSlice[T any, V constraints.Ordered](items []T, direction SortDirection, prop func(T) V) {
-	lessFn := func(i, j int) bool {
-		if direction == Desc {
-			return prop(items[i]) > prop(items[j])
-		}
-		return prop(items[i]) < prop(items[j])
+	if direction == Desc {
+		sort.Slice(items, func(i, j int) bool { return prop(items[i]) > prop(items[j]) })
+	} else {
+		sort.Slice(items, func(i, j int) bool { return prop(items[i]) < prop(items[j]) })
 	}
-	sort.Slice(items, lessFn)
 }
