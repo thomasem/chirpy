@@ -106,6 +106,22 @@ func getAPIKeyFromRequest(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(av, "ApiKey"))
 }
 
+func getAuthorID(r *http.Request) (int, error) {
+	authorIDString := r.URL.Query().Get("author_id")
+	if authorIDString == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(authorIDString)
+}
+
+func getSortDir(r *http.Request) database.SortDirection {
+	sortDirString := r.URL.Query().Get("sort")
+	if sortDirString == "desc" {
+		return database.Desc
+	}
+	return database.Asc
+}
+
 func decodeBody[T any](r *http.Request) (T, error) {
 	var dst T
 	decoder := json.NewDecoder(r.Body)
@@ -265,7 +281,13 @@ func (cs *chirpyService) deleteChirpHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (cs *chirpyService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps := cs.db.GetChirps()
+	authorID, err := getAuthorID(r)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid author ID in URL")
+		return
+	}
+	sort := getSortDir(r)
+	chirps := cs.db.GetChirps(authorID, sort)
 	response := make([]Chirp, 0, len(chirps))
 	for _, chirp := range chirps {
 		response = append(response, Chirp{

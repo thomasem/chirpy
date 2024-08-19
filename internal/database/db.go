@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"sort"
 	"sync"
 	"time"
 )
@@ -123,7 +122,7 @@ func (db *DB) GetUsers() []User {
 	for _, u := range db.data.Users {
 		users = append(users, u.User)
 	}
-	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
+	sortSlice(users, Asc, func(u User) int { return u.ID })
 	return users
 }
 
@@ -267,14 +266,16 @@ func (db *DB) GetChirp(chirpID int) (Chirp, error) {
 	return c, nil
 }
 
-func (db *DB) GetChirps() []Chirp {
+func (db *DB) GetChirps(authorID int, sortDirection SortDirection) []Chirp {
 	db.mux.RLock()
 	defer db.mux.RUnlock()
 	chirps := make([]Chirp, 0, len(db.data.Chirps))
 	for _, chirp := range db.data.Chirps {
-		chirps = append(chirps, chirp)
+		if authorID == 0 || chirp.AuthorID == authorID {
+			chirps = append(chirps, chirp)
+		}
 	}
-	sort.Slice(chirps, func(i, j int) bool { return chirps[i].ID < chirps[j].ID })
+	sortSlice(chirps, sortDirection, func(c Chirp) int { return c.ID })
 	return chirps
 }
 
