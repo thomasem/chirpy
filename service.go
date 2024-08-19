@@ -30,8 +30,9 @@ const (
 )
 
 type User struct {
-	ID    int    `json:"id"`
-	Email string `json:"email"`
+	ID          int    `json:"id"`
+	Email       string `json:"email"`
+	IsChirpyRed bool   `json:"is_chirpy_red"`
 }
 
 type userRequest struct {
@@ -64,11 +65,21 @@ type chirpRequest struct {
 	Body string `json:"body"`
 }
 
+type polkaEventData struct {
+	UserID int `json:"user_id"`
+}
+
+type polkaEvent struct {
+	Event string         `json:"event"`
+	Data  polkaEventData `json:"data"`
+}
+
 type chirpyService struct {
 	fileserverHits int
 	metricsMux     *sync.RWMutex
 	db             *database.DB
-	jwtSecret      []byte
+	jwtSecret      string
+	polkaKey       string
 }
 
 func cleanBody(body string) string {
@@ -85,8 +96,20 @@ func cleanBody(body string) string {
 	return strings.Join(words, " ")
 }
 
-func stripBearer(av string) string {
+func getTokenFromRequest(r *http.Request) string {
+	av := r.Header.Get(authorizationHeader)
 	return strings.TrimSpace(strings.TrimPrefix(av, "Bearer"))
+}
+
+func getAPIKeyFromRequest(r *http.Request) string {
+	av := r.Header.Get(authorizationHeader)
+	return strings.TrimSpace(strings.TrimPrefix(av, "ApiKey"))
+}
+
+func decodeBody[T any](r *http.Request) (T, error) {
+	var dst T
+	decoder := json.NewDecoder(r.Body)
+	return dst, decoder.Decode(&dst)
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
@@ -165,20 +188,17 @@ func (cs *chirpyService) resetHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get(authorizationHeader)
+	token := getTokenFromRequest(r)
 	if token == "" {
 		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
 		return
 	}
-	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer"))
 	userID, err := cs.getUserIDFromJWT(token)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	cr := chirpRequest{}
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(&cr)
+	cr, err := decodeBody[chirpRequest](r)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
@@ -203,6 +223,45 @@ func (cs *chirpyService) createChirpHandler(w http.ResponseWriter, r *http.Reque
 		AuthorID: newChirp.AuthorID,
 		Body:     newChirp.Body,
 	})
+}
+
+func (cs *chirpyService) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+	token := getTokenFromRequest(r)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
+		return
+	}
+	userID, err := cs.getUserIDFromJWT(token)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	chirpIDStr := r.PathValue("chirpID")
+	chirpID, err := strconv.Atoi(chirpIDStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unexpected path value: %s", chirpIDStr))
+		return
+	}
+	chirp, err := cs.db.GetChirp(chirpID)
+	if err == database.ErrDoesNotExist {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		log.Printf("Unable to get chirp from database: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "Error retrieving chirp")
+		return
+	}
+	if chirp.AuthorID != userID {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	err = cs.db.DeleteChirp(chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (cs *chirpyService) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
@@ -243,9 +302,7 @@ func (cs *chirpyService) getChirpHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Request) {
-	ur := userRequest{}
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&ur)
+	ur, err := decodeBody[userRequest](r)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
@@ -271,15 +328,14 @@ func (cs *chirpyService) createUserHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	respondWithJSON(w, http.StatusCreated, User{
-		ID:    user.ID,
-		Email: user.Email,
+		ID:          user.ID,
+		Email:       user.Email,
+		IsChirpyRed: user.ChirpyRed,
 	})
 }
 
 func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
-	lr := loginRequest{}
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&lr)
+	lr, err := decodeBody[loginRequest](r)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid login request")
 		return
@@ -305,7 +361,7 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, "Unable to generate refresh token for user")
 		return
 	}
-	rt, err := cs.db.CreateRefreshToken(refreshToken, au.ID, rtExpiresInSeconds)
+	_, err = cs.db.CreateRefreshToken(refreshToken, au.ID, rtExpiresInSeconds)
 	if err != nil {
 		log.Printf("error creating refresh token in database: %s", err)
 		respondWithError(w, http.StatusInternalServerError, "Unable to save refresh token")
@@ -313,21 +369,21 @@ func (cs *chirpyService) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondWithJSON(w, http.StatusOK, loginResponse{
 		User: User{
-			ID:    au.ID,
-			Email: au.Email,
+			ID:          au.ID,
+			Email:       au.Email,
+			IsChirpyRed: au.ChirpyRed,
 		},
 		Token:        jwt,
-		RefreshToken: rt.Token,
+		RefreshToken: refreshToken,
 	})
 }
 
 func (cs *chirpyService) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get(authorizationHeader)
+	token := getTokenFromRequest(r)
 	if token == "" {
 		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
 		return
 	}
-	token = stripBearer(token)
 	rt, err := cs.db.GetRefreshToken(token)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid token")
@@ -349,12 +405,11 @@ func (cs *chirpyService) refreshTokenHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (cs *chirpyService) refreshTokenRevokeHandler(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get(authorizationHeader)
+	token := getTokenFromRequest(r)
 	if token == "" {
 		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
 		return
 	}
-	token = stripBearer(token)
 	err := cs.db.DeleteRefreshToken(token)
 	if err != nil {
 		log.Printf("error revoking refresh token: %s", err)
@@ -369,30 +424,28 @@ func (cs *chirpyService) getUsersHandler(w http.ResponseWriter, r *http.Request)
 	response := make([]User, 0, len(users))
 	for _, user := range users {
 		response = append(response, User{
-			ID:    user.ID,
-			Email: user.Email,
+			ID:          user.ID,
+			Email:       user.Email,
+			IsChirpyRed: user.ChirpyRed,
 		})
 	}
 	respondWithJSON(w, http.StatusOK, response)
 }
 
 func (cs *chirpyService) updateUserHandler(w http.ResponseWriter, r *http.Request) {
-	ur := userRequest{}
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&ur)
+	ur, err := decodeBody[userRequest](r)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
 		return
 	}
-	token := r.Header.Get(authorizationHeader)
+	token := getTokenFromRequest(r)
 	if token == "" {
 		respondWithError(w, http.StatusUnauthorized, "Token missing from request")
 		return
 	}
-	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer"))
 	userID, err := cs.getUserIDFromJWT(token)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	pwHash, err := auth.PasswordStringToHash(ur.Password)
@@ -407,16 +460,46 @@ func (cs *chirpyService) updateUserHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	respondWithJSON(w, http.StatusOK, User{
-		ID:    updated.ID,
-		Email: updated.Email,
+		ID:          updated.ID,
+		Email:       updated.Email,
+		IsChirpyRed: updated.ChirpyRed,
 	})
 }
 
-func NewChirpyService(db *database.DB, jwtSecret string) *chirpyService {
+func (cs *chirpyService) polkaWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	key := getAPIKeyFromRequest(r)
+	if key != cs.polkaKey {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	pe, err := decodeBody[polkaEvent](r)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON request")
+		return
+	}
+	if pe.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	err = cs.db.UpgradeUser(pe.Data.UserID)
+	if err == database.ErrDoesNotExist {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("error upgrading user in database: %s", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to upgrade user")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func NewChirpyService(db *database.DB, jwtSecret string, polkaKey string) *chirpyService {
 	return &chirpyService{
 		db:             db,
 		metricsMux:     &sync.RWMutex{},
 		fileserverHits: 0,
-		jwtSecret:      []byte(jwtSecret),
+		jwtSecret:      jwtSecret,
+		polkaKey:       polkaKey,
 	}
 }

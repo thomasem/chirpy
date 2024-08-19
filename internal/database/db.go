@@ -30,13 +30,14 @@ type Chirp struct {
 }
 
 type User struct {
-	ID    int    `json:"id"`
-	Email string `json:"email"`
+	ID        int    `json:"id"`
+	Email     string `json:"email"`
+	ChirpyRed bool   `json:"chirpy_red"`
 }
 
 type AuthUser struct {
 	User
-	Password []byte `json:"password"`
+	Password string `json:"password"`
 }
 
 type RefreshToken struct {
@@ -87,7 +88,7 @@ func (db *DB) writeDB() error {
 	return os.WriteFile(db.path, data, fileMode)
 }
 
-func (db *DB) CreateUser(email string, pwHash []byte) (User, error) {
+func (db *DB) CreateUser(email string, pwHash string) (User, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 	err := db.loadDB()
@@ -147,7 +148,7 @@ func (db *DB) GetAuthUserByEmail(email string) (AuthUser, error) {
 	return user, nil
 }
 
-func (db *DB) UpdateUser(userID int, email string, pwHash []byte) (User, error) {
+func (db *DB) UpdateUser(userID int, email string, pwHash string) (User, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 	err := db.loadDB()
@@ -168,6 +169,22 @@ func (db *DB) UpdateUser(userID int, email string, pwHash []byte) (User, error) 
 		return User{}, err
 	}
 	return user.User, nil
+}
+
+func (db *DB) UpgradeUser(userID int) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	user, ok := db.data.Users[userID]
+	if !ok {
+		return ErrDoesNotExist
+	}
+	user.ChirpyRed = true
+	db.data.Users[userID] = user
+	return db.writeDB()
 }
 
 func (db *DB) CreateRefreshToken(token string, userID int, expiresInSeconds int) (RefreshToken, error) {
@@ -259,6 +276,15 @@ func (db *DB) GetChirps() []Chirp {
 	}
 	sort.Slice(chirps, func(i, j int) bool { return chirps[i].ID < chirps[j].ID })
 	return chirps
+}
+
+func (db *DB) DeleteChirp(chirpID int) error {
+	err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	delete(db.data.Chirps, chirpID)
+	return db.writeDB()
 }
 
 func NewDB(path string, truncate bool) (*DB, error) {

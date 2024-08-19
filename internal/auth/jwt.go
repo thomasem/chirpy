@@ -10,7 +10,7 @@ const (
 	MaxExpiresInSeconds = 60 * 60 * 24 // 1 day
 )
 
-func NewJWT(subject string, secret []byte, expiresInSeconds int) (string, error) {
+func NewJWT(subject string, secret string, expiresInSeconds int) (string, error) {
 	if expiresInSeconds == 0 || expiresInSeconds > MaxExpiresInSeconds {
 		expiresInSeconds = MaxExpiresInSeconds
 	}
@@ -23,14 +23,14 @@ func NewJWT(subject string, secret []byte, expiresInSeconds int) (string, error)
 		IssuedAt:  jwt.NewNumericDate(issuedAt),
 		ExpiresAt: jwt.NewNumericDate(expiresAt),
 	})
-	s, err := token.SignedString(secret)
+	s, err := token.SignedString([]byte(secret))
 	return s, err
 }
 
-func GetClaimsFromJWT(jwtString string, secret []byte) (*jwt.RegisteredClaims, error) {
+func GetClaimsFromJWT(jwtString string, secret string) (*jwt.RegisteredClaims, error) {
 	parser := jwt.NewParser()
 	kf := func(t *jwt.Token) (interface{}, error) {
-		return secret, nil
+		return []byte(secret), nil
 	}
 	token, err := parser.ParseWithClaims(jwtString, &jwt.RegisteredClaims{}, kf)
 	if err != nil {

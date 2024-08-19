@@ -15,6 +15,7 @@ const (
 	addr         = "localhost:8080"
 	dbPath       = "database.json"
 	jwtSecretEnv = "JWT_SECRET"
+	polkaKeyEnv  = "POLKA_API_KEY"
 )
 
 type errorResponse struct {
@@ -47,6 +48,10 @@ func configureRoutes(mux *http.ServeMux, cs *chirpyService) {
 	// JWT Authenticated API
 	mux.Handle("PUT /api/users", http.HandlerFunc(cs.updateUserHandler))
 	mux.Handle("POST /api/chirps", http.HandlerFunc(cs.createChirpHandler))
+	mux.Handle("DELETE /api/chirps/{chirpID}", http.HandlerFunc(cs.deleteChirpHandler))
+
+	// Polka Webhooks
+	mux.Handle("POST /api/polka/webhooks", http.HandlerFunc(cs.polkaWebhookHandler))
 
 	// App
 	appHandler := http.FileServer(http.Dir('.'))
@@ -64,6 +69,11 @@ func main() {
 		log.Fatalf("'%s' not set in environment variables", jwtSecretEnv)
 	}
 
+	polkaKey := os.Getenv(polkaKeyEnv)
+	if polkaKey == "" {
+		log.Fatalf("'%s' not set in environment variables", polkaKeyEnv)
+	}
+
 	dbg := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
 
@@ -77,7 +87,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("error getting DB connection: %s", err)
 	}
-	cs := NewChirpyService(db, jwtSecret)
+	cs := NewChirpyService(db, jwtSecret, polkaKey)
 
 	configureRoutes(mux, cs)
 
